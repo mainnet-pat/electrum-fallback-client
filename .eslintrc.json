@@ -1,0 +1,24 @@
+{
+	"extends": ["@generalprotocols/eslint-config/typescript"],
+	"parserOptions":
+	{
+		"project":"./tsconfig.json",
+		"ecmaVersion":2018,
+		"sourceType":"module"
+	},
+	"rules":
+	{
+		"func-style": ["error", "declaration"],
+	        "max-len":
+		[
+			"warn", 250, 4, 
+			{
+		            "ignoreUrls": true,
+		            "ignoreComments": false,
+		            "ignoreRegExpLiterals": true,
+		            "ignoreStrings": true,
+		            "ignoreTemplateLiterals": true
+		        }
+		]
+	}
+}

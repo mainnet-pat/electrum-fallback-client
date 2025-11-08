@@ -1,0 +1,30 @@
+{
+	"entryPoints": [ "source/index.ts" ],
+	"out": "public/",
+	"plugin": [ "typedoc-plugin-coverage" ],
+	"maxTypeConversionDepth": 2,
+	"visibilityFilters":
+	{
+		"protected": false,
+		"private": false,
+		"inherited": false,
+		"external": false
+    },
+    "groupOrder": [ "Classes", "Interfaces", "Events", "*"],
+    "navigation":
+    {
+		"includeCategories": false,
+		"includeGroups": true
+	},
+	"navigationLinks":
+	{
+		"Application": "https://electrum-cash.gitlab.io/application/",
+		"Protocol": "https://electrum-cash.gitlab.io/protocol/",
+		"Network": "https://electrum-cash.gitlab.io/network/",
+		"Sockets": "https://electrum-cash.gitlab.io/sockets/",
+		"-": "",
+		"Servers": "https://electrum-cash.gitlab.io/servers/",
+		"Checkpoint": "https://electrum-cash.gitlab.io/checkpoint/",
+		"|": ""
+	}
+}

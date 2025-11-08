@@ -1,0 +1,10 @@
+# Ignore the parcel packagin cache.
+.parcel-cache/
+
+# Ignore compiled resources
+dist/
+public/
+coverage/
+
+# Ignore dependencies
+node_modules/
