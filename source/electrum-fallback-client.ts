@@ -2,8 +2,6 @@ import debug from '@electrum-cash/debug-logs';
 import { ElectrumClientEvents, RPCParameter, RequestResponse, RPCNotification, ElectrumClient, ConnectionStatus, ElectrumSocket, ElectrumNetworkOptions } from '@electrum-cash/network';
 import { EventEmitter } from 'eventemitter3';
 
-export { ElectrumClientEvents } from '@electrum-cash/network';
-
 export type RankOptions = {
   /**
    * The polling interval (in ms) at which the ranker should ping the RPC URL.

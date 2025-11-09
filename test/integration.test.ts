@@ -1,8 +1,8 @@
-import { ConnectionStatus, ElectrumClient, ElectrumClientEvents, ElectrumSocket } from '@electrum-cash/network';
+import { ConnectionStatus, ElectrumClient, ElectrumSocket } from '@electrum-cash/network';
 import { ElectrumTcpSocket } from '@electrum-cash/tcp-socket';
 import { ElectrumWebSocket } from '@electrum-cash/web-socket';
 import { describe, expect, test } from 'vitest';
-import { ElectrumFallbackClient } from '../source';
+import { ElectrumFallbackClient, ElectrumClientEvents } from '../source';
 import { UseCase, useCases } from './use-cases';
 
 // Declare use case as a global-scope reference variable.
