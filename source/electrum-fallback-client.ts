@@ -129,14 +129,16 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	async connect(): Promise<void> {
 		this.emit('connecting');
 		let connected = false;
-		for (const client of this.clients) {
-			try {
-				await client.connect();
-				connected = true;
-			} catch {
-				// Ignore individual client errors, as some clients may be down.
-			}
-		}
+		await Promise.all(
+			this.clients.map(async (client) => {
+				try {
+					await client.connect();
+					connected = true;
+				} catch {
+					// Ignore individual client errors, as some clients may be down.
+				}
+			})
+		);
 
 		if (!connected) {
 			throw new Error('Failed to connect to any underlying Electrum client.');
@@ -172,9 +174,9 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	{
 		this.emit('disconnecting');
 		this.rankingAbortController?.abort();
-		for (const client of this.clients) {
-			await client.disconnect(force, retainSubscriptions);
-		}
+		await Promise.all(
+			this.clients.map(client => client.disconnect(force, retainSubscriptions))
+		);
 
 		this.emit('disconnected');
 
