@@ -1,6 +1,6 @@
 {
   "name": "@mainnet-pat/electrum-fallback-client",
-  "version": "4.1.10",
+  "version": "4.1.11",
   "description": "@mainnet-pat/electrum-fallback-client is a lightweight JavaScript library that lets you connect with one or more Electrum servers with fallback and ranking strategies.",
   "keywords": [
     "electrum",
