@@ -60,7 +60,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 
 	public rank: boolean | RankOptions | undefined;
 	private rankingAbortController: AbortController;
-	public scores: number[][] = [];
+	public scores: [number, number, string][] = [];
 
 	get status(): ConnectionStatus {
 		return this.clients.some(client => client.status === ConnectionStatus.CONNECTED) ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED;
@@ -129,16 +129,21 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	async connect(): Promise<void> {
 		this.emit('connecting');
 		let connected = false;
-		await Promise.all(
-			this.clients.map(async (client) => {
-				try {
-					await client.connect();
-					connected = true;
-				} catch {
-					// Ignore individual client errors, as some clients may be down.
-				}
-			})
-		);
+		try {
+			const index = await Promise.any(
+				this.clients.map((client, i) =>
+					client.connect().then(() => i)
+				)
+			);
+			// Move the connected client to the beginning of the list
+			if (index > 0) {
+				const [connectedClient] = this.clients.splice(index, 1);
+				this.clients.unshift(connectedClient);
+			}
+			connected = true;
+		} catch {
+			// All clients failed to connect.
+		}
 
 		if (!connected) {
 			throw new Error('Failed to connect to any underlying Electrum client.');
@@ -197,7 +202,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	}: {
 		interval: RankOptions['interval']
 		onClients: (clients: readonly ElectrumClient<ElectrumEvents>[]) => void
-		onScores?: (scores: number[][]) => void
+		onScores?: (scores: [number, number, string][]) => void
 		ping?: RankOptions['ping'] | undefined
 		sampleCount?: RankOptions['sampleCount'] | undefined
 		timeout?: RankOptions['timeout'] | undefined
@@ -254,7 +259,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 
 			// 4. Calculate the score for each Transport.
 			const scores = clients
-				.map((_, i) => {
+				.map((client, i) => {
 					const latencies = samples.map((sample) => sample[i].latency)
 					const meanLatency =
 						latencies.reduce((acc, latency) => acc + latency, 0) /
@@ -266,11 +271,12 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 						successes.reduce((acc, success) => acc + success, 0) /
 						successes.length
 
-					if (stabilityScore === 0) return [0, i]
+					if (stabilityScore === 0) return [0, i, client.hostIdentifier] as [number, number, string];
 					return [
 						latencyWeight * latencyScore + stabilityWeight * stabilityScore,
 						i,
-					]
+						client.hostIdentifier,
+					] as [number, number, string];
 				})
 				.sort((a, b) => b[0] - a[0])
 
