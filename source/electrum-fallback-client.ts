@@ -45,6 +45,9 @@ export type RankOptions = {
 
 const pollingInterval = 4_000;
 
+export type Score = [number, number, string];
+export type Scores = Score[];
+
 /**
  * High-level Electrum client that lets applications send requests and subscribe to notification events from a server.
  */
@@ -60,11 +63,13 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 
 	public rank: boolean | RankOptions | undefined;
 	private rankingAbortController: AbortController;
-	public scores: [number, number, string][] = [];
+	public scores: Scores = [];
+	public onScores: ((scores: Scores) => void) | undefined;
 
 	get status(): ConnectionStatus {
 		return this.clients.some(client => client.status === ConnectionStatus.CONNECTED) ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED;
 	};
+
 	get hostIdentifier(): string {
 		return `FallbackClient [${this.clients.map(client => client.hostIdentifier).join(', ')}]`;
 	};
@@ -121,50 +126,79 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	};
 
 	/**
-	 * Connects to the remote server.
+	 * Connects to the remote servers.
 	 *
 	 * @throws {Error} if the socket connection fails.
 	 * @returns a promise resolving when the connection is established.
 	 */
 	async connect(): Promise<void> {
+		if(this.status === ConnectionStatus.CONNECTED)
+		{
+			return;
+		}
+
 		this.emit('connecting');
 		let connected = false;
-		try {
-			const index = await Promise.any(
-				this.clients.map((client, i) =>
-					client.connect().then(() => i)
-				)
-			);
-			// Move the connected client to the beginning of the list
-			if (index > 0) {
-				const [connectedClient] = this.clients.splice(index, 1);
-				this.clients.unshift(connectedClient);
+
+		if (!this.rank) {
+			for (const [index, client] of this.clients.entries()) {
+				try {
+					await client.connect();
+					connected = true;
+
+					// Connect the rest of the clients asynchronously in the background
+					const remainingClients = this.clients.slice(index + 1);
+					Promise.allSettled(remainingClients.map(c => c.connect()));
+
+					// Move the connected client to the beginning of the list
+					if (this.clients[0] !== client) {
+						this.clients = [client, ...this.clients.filter(c => c !== client)];
+					}
+					break;
+				} catch {
+					// Try the next client.
+				}
 			}
-			connected = true;
-		} catch {
-			// All clients failed to connect.
+		} else {
+			try {
+				const promises = this.clients.map(client =>
+					client.connect().then(() => client)
+				);
+				const client = await Promise.any(promises);
+				// Move the connected client to the beginning of the list
+				if (this.clients[0] !== client) {
+					this.clients = [client, ...this.clients.filter(c => c !== client)];
+				}
+				connected = true;
+
+				// wait for the rest of the clients to connect in the background, then start ranking
+				Promise.allSettled(promises).then(() => {
+					this.rankingAbortController = new AbortController();
+					const rankOptions = (typeof this.rank === 'object' ? this.rank : {}) as RankOptions;
+					this.rankClients({
+						interval: rankOptions.interval ?? pollingInterval,
+						onClients: (clients_) => (this.clients = clients_ as any),
+						onScores: (scores_) => {
+							this.scores = scores_;
+							this.onScores?.(scores_);
+						},
+						ping: rankOptions.ping,
+						sampleCount: rankOptions.sampleCount,
+						timeout: rankOptions.timeout,
+						clients: this.clients,
+						weights: rankOptions.weights,
+						abortController: this.rankingAbortController,
+					});
+				});
+			} catch {
+				// All clients failed to connect.
+			}
 		}
 
 		if (!connected) {
 			throw new Error('Failed to connect to any underlying Electrum client.');
 		}
 		this.emit('connected');
-
-    if (this.rank) {
-			this.rankingAbortController = new AbortController();
-      const rankOptions = (typeof this.rank === 'object' ? this.rank : {}) as RankOptions;
-      this.rankClients({
-        interval: rankOptions.interval ?? pollingInterval,
-        onClients: (clients_) => (this.clients = clients_ as any),
-				onScores: (scores_) => (this.scores = scores_),
-        ping: rankOptions.ping,
-        sampleCount: rankOptions.sampleCount,
-        timeout: rankOptions.timeout,
-        clients: this.clients,
-        weights: rankOptions.weights,
-				abortController: this.rankingAbortController,
-      });
-    }
 	}
 
 	/**
@@ -178,8 +212,10 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	async disconnect(force: boolean = false, retainSubscriptions: boolean = false): Promise<boolean>
 	{
 		this.emit('disconnecting');
+		this.onScores = undefined;
 		this.rankingAbortController?.abort();
-		await Promise.all(
+
+		await Promise.allSettled(
 			this.clients.map(client => client.disconnect(force, retainSubscriptions))
 		);
 
@@ -189,7 +225,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	}
 
 	// Ranks the provided clients according to stability and latency.
-	public rankClients({
+	public async rankClients({
 		interval = 4_000,
 		onClients,
 		onScores,
@@ -202,7 +238,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	}: {
 		interval: RankOptions['interval']
 		onClients: (clients: readonly ElectrumClient<ElectrumEvents>[]) => void
-		onScores?: (scores: [number, number, string][]) => void
+		onScores?: (scores: Scores) => void
 		ping?: RankOptions['ping'] | undefined
 		sampleCount?: RankOptions['sampleCount'] | undefined
 		timeout?: RankOptions['timeout'] | undefined
@@ -216,9 +252,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 		type Sample = SampleData[]
 		const samples: Sample[] = []
 
-		const rankClients_ = async () => {
-			if (abortController?.signal.aborted) return;
-
+		while (!abortController?.signal.aborted) {
 			// 1. Take a sample from each Transport.
 			const sample: Sample = await Promise.all(
 				clients.map(async (client) => {
@@ -271,12 +305,12 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 						successes.reduce((acc, success) => acc + success, 0) /
 						successes.length
 
-					if (stabilityScore === 0) return [0, i, client.hostIdentifier] as [number, number, string];
+					if (stabilityScore === 0) return [0, i, client.hostIdentifier] as Score
 					return [
 						latencyWeight * latencyScore + stabilityWeight * stabilityScore,
 						i,
 						client.hostIdentifier,
-					] as [number, number, string];
+					] as Score
 				})
 				.sort((a, b) => b[0] - a[0])
 
@@ -286,11 +320,9 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 			onClients(scores.map(([, i]) => clients[i]))
 
 			// 6. Wait, and then rank again.
-			if (abortController?.signal.aborted) return
+			if (abortController?.signal.aborted) break
 			await new Promise((res) => setTimeout(res, interval))
-			rankClients_()
 		}
-		rankClients_()
 	}
 
 
@@ -328,15 +360,8 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 					...parameters,
 				)
 
-				// if(response instanceof Error)
-				// {
-				// 	throw(response);
-				// }
-
 				return [response, client]
 			} catch (err) {
-				// if (shouldThrow_(err as Error)) throw err
-
 				// If we've reached the end of the fallbacks, throw the error.
 				if (i === this.clients.length - 1) throw err
 

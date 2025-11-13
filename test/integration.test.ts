@@ -464,3 +464,33 @@ test('Should test utility initializer', async () =>
 
 	await electrum.disconnect();
 });
+
+test('Should abort ranking upon disconnect', async () => {
+	let pings = 0;
+
+	// Configure a secured web socket.
+	const clients: ElectrumClient<ElectrumClientEvents>[] = initClientsWithSockets(ElectrumWebSocket, 50004, true);
+
+	// Initialize an electrum client.
+	const electrum = new ElectrumFallbackClient(clients, { rank: {
+		interval: 1000,
+	}});
+
+	electrum.onScores = (scores) => {
+		pings += 1;
+	};
+
+	await electrum.connect();
+
+	// Wait some time to allow ranking pings to occur.
+	await new Promise<void>((resolve) => setTimeout(() => resolve(), 2500));
+
+	await electrum.disconnect();
+
+	const recordedPings = pings;
+
+	// Wait some more time to ensure no further pings are recorded after disconnect.
+	await new Promise<void>((resolve) => setTimeout(() => resolve(), 2500));
+
+	expect(pings).toBe(recordedPings);
+});
