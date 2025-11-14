@@ -2,6 +2,13 @@ import debug from '@electrum-cash/debug-logs';
 import { ElectrumClientEvents, RPCParameter, RequestResponse, RPCNotification, ElectrumClient, ConnectionStatus, ElectrumSocket, ElectrumNetworkOptions } from '@electrum-cash/network';
 import { EventEmitter } from 'eventemitter3';
 
+const WithTimeout = <T>(promise: Promise<T>, timeout: number, timeoutError: Error): Promise<T> => {
+	return Promise.race([
+		promise,
+		new Promise<T>((_, reject) => setTimeout(() => reject(timeoutError), timeout))
+	]);
+};
+
 export type RankOptions = {
   /**
    * The polling interval (in ms) at which the ranker should ping the RPC URL.
@@ -77,6 +84,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 	public rank: boolean | RankOptions | undefined;
 	private rankingAbortController: AbortController;
 	public scores: Scores = [];
+	public connectTimeout: number = 1000;
 
 	get status(): ConnectionStatus {
 		return this.clients.some(client => client.status === ConnectionStatus.CONNECTED) ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED;
@@ -86,9 +94,13 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 		return `FallbackClient [${this.clients.map(client => client.hostIdentifier).join(', ')}]`;
 	};
 
-	constructor(public clients: ElectrumClient<ElectrumEvents>[], { rank = false }: {
+	constructor(public clients: ElectrumClient<ElectrumEvents>[], {
+		rank = false,
+		connectTimeout = 1000,
+	}: {
 		/** Toggle to enable ranking, or rank options. */
-		rank?: boolean | RankOptions | undefined
+		rank?: boolean | RankOptions | undefined,
+		connectTimeout?: number | undefined,
 	} | undefined = {}) {
 		if (clients.length === 0) {
 			throw new Error('At least one ElectrumClient must be provided to ElectrumFallbackClient.');
@@ -96,6 +108,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 
 		super();
 		this.rank = rank;
+		this.connectTimeout = connectTimeout;
 
 		// Check for duplicate clients by hostIdentifier
 		const seen = new Set<string>();
@@ -155,12 +168,12 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 		if (!this.rank) {
 			for (const [index, client] of this.clients.entries()) {
 				try {
-					await client.connect();
+					await WithTimeout(client.connect(), this.connectTimeout, new Error('Connection timeout'));
 					connected = true;
 
 					// Connect the rest of the clients asynchronously in the background
 					const remainingClients = this.clients.slice(index + 1);
-					Promise.allSettled(remainingClients.map(c => c.connect()));
+					Promise.allSettled(remainingClients.map(c => WithTimeout(c.connect(), this.connectTimeout, new Error('Connection timeout'))));
 
 					// Move the connected client to the beginning of the list
 					if (this.clients[0] !== client) {
@@ -174,7 +187,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 		} else {
 			try {
 				const promises = this.clients.map(client =>
-					client.connect().then(() => client)
+					WithTimeout(client.connect(), this.connectTimeout, new Error('Connection timeout')).then(() => client)
 				);
 				const client = await Promise.any(promises);
 				// Move the connected client to the beginning of the list
@@ -227,7 +240,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 		this.rankingAbortController?.abort();
 
 		await Promise.allSettled(
-			this.clients.map(client => client.disconnect(force, retainSubscriptions))
+			this.clients.map(client => WithTimeout(client.disconnect(force, retainSubscriptions), 1000, new Error('Disconnect timeout')))
 		);
 
 		this.emit('disconnected');
@@ -273,11 +286,11 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 					let end: number
 					let success: number
 					try {
-						await (
-							Promise.race([
-									ping ? ping({ client: client_ }) : client_.request('server.ping'),
-									new Promise((_, reject) => setTimeout(() => reject(new Error('Ping timeout')), timeout))
-								]))
+						await WithTimeout(
+							ping ? ping({ client: client_ }) : client_.request('server.ping'),
+							timeout,
+							new Error('Ping timeout')
+						)
 						success = 1
 					} catch (err) {
 						debug.warning(`Ping failed for client ${client_.hostIdentifier}`, err);
