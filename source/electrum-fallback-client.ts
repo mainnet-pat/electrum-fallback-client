@@ -58,7 +58,7 @@ export interface ElectrumFallbackClientEvents extends ElectrumClientEvents {
 	 * Emitted when ranking scores update.
 	 * @eventProperty
 	 */
-	'scores': Scores;
+	'rankScores': [Scores];
 }
 
 /**
@@ -192,7 +192,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 						onClients: (clients_) => (this.clients = clients_ as any),
 						onScores: (scores_) => {
 							this.scores = scores_;
-							this.emit('scores', scores_ as any);
+							this.emit('rankScores', scores_);
 						},
 						ping: rankOptions.ping,
 						sampleCount: rankOptions.sampleCount,
@@ -518,6 +518,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 	public readonly reconnecting: [];
 	public readonly notification: [ RPCNotification ];
 	public readonly error: [ Error ];
+	public readonly rankScores: [Scores];
 }
 
 // Export the client.
