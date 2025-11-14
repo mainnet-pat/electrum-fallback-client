@@ -49,9 +49,22 @@ export type Score = [number, number, string];
 export type Scores = Score[];
 
 /**
+ * List of events emitted by the ElectrumClient.
+ * @event
+ * @ignore
+ */
+export interface ElectrumFallbackClientEvents extends ElectrumClientEvents {
+	/**
+	 * Emitted when ranking scores update.
+	 * @eventProperty
+	 */
+	'scores': Scores;
+}
+
+/**
  * High-level Electrum client that lets applications send requests and subscribe to notification events from a server.
  */
-export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents> extends EventEmitter<ElectrumClientEvents | ElectrumEvents> implements ElectrumClientEvents {
+export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClientEvents> extends EventEmitter<ElectrumFallbackClientEvents | ElectrumEvents> implements ElectrumFallbackClientEvents {
 	/**
 	 * The chain height of the blockchain indexed by the server.
 	 * @remarks This is only available after a 'blockchain.headers.subscribe' call.
@@ -64,7 +77,6 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	public rank: boolean | RankOptions | undefined;
 	private rankingAbortController: AbortController;
 	public scores: Scores = [];
-	public onScores: ((scores: Scores) => void) | undefined;
 
 	get status(): ConnectionStatus {
 		return this.clients.some(client => client.status === ConnectionStatus.CONNECTED) ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED;
@@ -180,7 +192,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 						onClients: (clients_) => (this.clients = clients_ as any),
 						onScores: (scores_) => {
 							this.scores = scores_;
-							this.onScores?.(scores_);
+							this.emit('scores', scores_ as any);
 						},
 						ping: rankOptions.ping,
 						sampleCount: rankOptions.sampleCount,
@@ -212,7 +224,6 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumClientEvents>
 	async disconnect(force: boolean = false, retainSubscriptions: boolean = false): Promise<boolean>
 	{
 		this.emit('disconnecting');
-		this.onScores = undefined;
 		this.rankingAbortController?.abort();
 
 		await Promise.allSettled(

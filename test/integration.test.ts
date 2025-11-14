@@ -476,9 +476,10 @@ test('Should abort ranking upon disconnect', async () => {
 		interval: 1000,
 	}});
 
-	electrum.onScores = (scores) => {
+	electrum.on('scores', (scores) => {
+		expect(scores).toBe(electrum.scores);
 		pings += 1;
-	};
+	});
 
 	await electrum.connect();
 
