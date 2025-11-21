@@ -48,6 +48,11 @@ export type RankOptions = {
         stability?: number | undefined
       }
     | undefined
+	/**
+	 * Minimum score change threshold to reorder best clients.
+	 * @default 0.10
+	 */
+	threshold?: number | undefined
 }
 
 const pollingInterval = 4_000;
@@ -213,6 +218,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 						clients: this.clients,
 						weights: rankOptions.weights,
 						abortController: this.rankingAbortController,
+						threshold: rankOptions.threshold,
 					});
 				});
 			} catch {
@@ -259,6 +265,7 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 		clients,
 		weights = {},
 		abortController,
+		threshold = 0.10,
 	}: {
 		interval: RankOptions['interval']
 		onClients: (clients: readonly ElectrumClient<ElectrumEvents>[]) => void
@@ -269,12 +276,14 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 		clients: readonly ElectrumClient<ElectrumEvents>[]
 		weights?: RankOptions['weights'] | undefined
 		abortController?: AbortController
+		threshold?: number
 	}) {
 		const { stability: stabilityWeight = 0.7, latency: latencyWeight = 0.3 } = weights
 
 		type SampleData = { latency: number; success: number }
 		type Sample = SampleData[]
 		const samples: Sample[] = []
+		let previousScores: Scores = []
 
 		while (!abortController?.signal.aborted) {
 			// 1. Take a sample from each Transport.
@@ -338,6 +347,22 @@ export class ElectrumFallbackClient<ElectrumEvents extends ElectrumFallbackClien
 				})
 				.sort((a, b) => b[0] - a[0])
 
+			// Only reorder if the new best server's score changed by at least the threshold.
+			if (threshold > 0 && previousScores.length > 0 && scores.length > 0) {
+				const prevBest = previousScores[0];
+				const newBest = scores[0];
+				if (newBest[2] !== prevBest[2] && (newBest[0] - prevBest[0] <= threshold)) {
+					// Put the old best on top if the score change is not significant
+					const oldBestIndex = scores.findIndex(([, , id]) => id === prevBest[2]);
+					if (oldBestIndex > 0) {
+						const [oldBestScore] = scores.splice(oldBestIndex, 1);
+						scores.unshift(oldBestScore);
+					}
+				}
+			}
+			previousScores = scores
+
+			// Emit scores if a callback is provided.
 			onScores?.(scores)
 
 			// 5. Sort the Transports by score.
